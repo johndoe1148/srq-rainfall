@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -34,6 +35,7 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 MAX_WORKERS = 8
 WATER_ATLAS_HOME = "https://www.sarasota.wateratlas.usf.edu/"
+EASTERN = ZoneInfo("America/New_York")
 
 # The default field-check circuit, in the user's preferred order.
 STATION_CHECKS = {
@@ -198,12 +200,32 @@ def _station_label(station: MorningRainfall) -> str:
     return name
 
 
+def format_eastern(moment: datetime) -> str:
+    """Format a timestamp in Eastern Time with EDT or EST from the date."""
+    if moment.tzinfo is None:
+        # Water Atlas last-updated stamps are local station time with no offset.
+        moment = moment.replace(tzinfo=EASTERN)
+    else:
+        moment = moment.astimezone(EASTERN)
+    return moment.strftime("%Y-%m-%d %H:%M %Z")
+
+
+def format_last_updated(raw: str | None) -> str:
+    if not raw:
+        return "--"
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return str(raw)
+    return format_eastern(parsed)
+
+
 def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, top: int | None) -> str:
     shown = stations
     if top:
         shown = sorted(stations, key=lambda station: station.rain_8h_in or -1, reverse=True)[:top]
 
-    generated = generated_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    generated = format_eastern(generated_at)
     lines = [
         "# Sarasota County rainfall",
         "",
@@ -235,7 +257,7 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
                     number(station.rain_8h_in),
                     number(station.rain_24h_in),
                     number(station.rain_7d_in),
-                    station.last_updated or "--",
+                    format_last_updated(station.last_updated),
                 ]
             )
             + " |"
@@ -306,7 +328,7 @@ def main() -> None:
     args = parser.parse_args()
 
     stations = fetch_report(args.site_id, args.all_stations)
-    generated_at = datetime.now(timezone.utc)
+    generated_at = datetime.now(EASTERN)
     markdown = render_markdown(stations, generated_at=generated_at, top=args.top)
 
     if args.readme:
