@@ -3,6 +3,8 @@
 The 1-, 2-, and 8-hour figures are calculated by summing the timestamped
 precipitation increments returned by the Data Mapper graph API.  The 24-hour
 and 7-day figures come directly from the Water Atlas rainfall summary API.
+NWS 24/48/72-hour columns are National Weather Service quantitative precipitation
+forecasts at each gauge's Water Atlas coordinates.
 
 Usage:
     uv run srq-rainfall
@@ -16,12 +18,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 import requests
@@ -30,12 +34,23 @@ API_BASE = "https://api.wateratlas.usf.edu"
 DEFAULT_SITE_ID = 8  # Sarasota County Water Atlas
 RAINFALL_PARAMETER = "Rainfall_IN"
 LOOKBACK_HOURS = (1, 2, 8)
+FORECAST_HOURS = (24, 48, 72)
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 MAX_WORKERS = 8
 WATER_ATLAS_HOME = "https://www.sarasota.wateratlas.usf.edu/"
 EASTERN = ZoneInfo("America/New_York")
+NWS_API_BASE = "https://api.weather.gov"
+NWS_USER_AGENT = "srq-rainfall (suntzu1079@gmail.com)"
+NWS_HEADERS = {
+    "User-Agent": NWS_USER_AGENT,
+    "Accept": "application/geo+json",
+}
+MM_PER_INCH = 25.4
+ISO8601_DURATION = re.compile(
+    r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?"
+)
 
 # The default field-check circuit, in the user's preferred order.
 STATION_CHECKS = {
@@ -55,6 +70,9 @@ class MorningRainfall:
     check_area: str | None
     latitude: float | None
     longitude: float | None
+    fcst_24h_in: float | None
+    fcst_48h_in: float | None
+    fcst_72h_in: float | None
     rain_1h_in: float | None
     rain_2h_in: float | None
     rain_8h_in: float | None
@@ -65,15 +83,23 @@ class MorningRainfall:
     datasource_id: str | None
 
 
-def get_json(url: str, *, params: dict[str, object] | None = None) -> object:
+def get_json(
+    url: str,
+    *,
+    params: dict[str, object] | None = None,
+    headers: dict[str, str] | None = None,
+) -> object:
     """Fetch JSON with short retries and a useful final error."""
+    request_headers = {"Accept": "application/json"}
+    if headers:
+        request_headers.update(headers)
     last_error: Exception | None = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = requests.get(
                 url,
                 params=params,
-                headers={"Accept": "application/json"},
+                headers=request_headers,
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
@@ -160,6 +186,9 @@ def build_station(record: dict) -> MorningRainfall:
         check_area=STATION_CHECKS.get(station_id),
         latitude=location.get("latitude"),
         longitude=location.get("longitude"),
+        fcst_24h_in=None,
+        fcst_48h_in=None,
+        fcst_72h_in=None,
         rain_1h_in=recent.get(1) if recent else None,
         rain_2h_in=recent.get(2) if recent else None,
         rain_8h_in=recent.get(8) if recent else None,
@@ -186,7 +215,113 @@ def fetch_report(site_id: int, include_all_stations: bool) -> list[MorningRainfa
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # map preserves the selected field-check order while still fetching in parallel.
-        return list(executor.map(build_station, raw_stations))
+        stations = list(executor.map(build_station, raw_stations))
+    attach_nws_forecasts(stations)
+    return stations
+
+
+def parse_iso8601_duration(duration: str) -> timedelta:
+    match = ISO8601_DURATION.fullmatch(duration)
+    if not match:
+        raise ValueError(f"unsupported ISO 8601 duration: {duration}")
+    days, hours, minutes, seconds = match.groups()
+    return timedelta(
+        days=int(days or 0),
+        hours=int(hours or 0),
+        minutes=int(minutes or 0),
+        seconds=float(seconds or 0),
+    )
+
+
+def parse_valid_time(valid_time: str) -> tuple[datetime, timedelta]:
+    start_s, duration_s = valid_time.split("/", 1)
+    start = datetime.fromisoformat(start_s.replace("Z", "+00:00"))
+    return start, parse_iso8601_duration(duration_s)
+
+
+def qpf_to_inches(amount_mm_or_in: float, uom: str | None) -> float:
+    unit = (uom or "").lower()
+    if "in" in unit and "min" not in unit:
+        return amount_mm_or_in
+    return amount_mm_or_in / MM_PER_INCH
+
+
+def sum_qpf_windows(values: list[dict], *, now: datetime, uom: str | None) -> dict[int, float]:
+    totals = {hours: 0.0 for hours in FORECAST_HOURS}
+    for item in values:
+        if not isinstance(item, dict) or item.get("value") is None or not item.get("validTime"):
+            continue
+        start, duration = parse_valid_time(str(item["validTime"]))
+        duration_seconds = duration.total_seconds()
+        if duration_seconds <= 0:
+            continue
+        end = start + duration
+        inches = qpf_to_inches(float(item["value"]), uom)
+        for hours in FORECAST_HOURS:
+            window_end = now + timedelta(hours=hours)
+            overlap = (min(end, window_end) - max(start, now)).total_seconds()
+            if overlap > 0:
+                totals[hours] += inches * (overlap / duration_seconds)
+    return {hours: round(total, 2) for hours, total in totals.items()}
+
+
+def fetch_nws_qpf_inches(
+    lat: float,
+    lon: float,
+    *,
+    grid_cache: dict[str, dict[int, float]],
+    grid_lock: Lock,
+) -> dict[int, float]:
+    points = get_json(f"{NWS_API_BASE}/points/{lat:.4f},{lon:.4f}", headers=NWS_HEADERS)
+    if not isinstance(points, dict):
+        raise RuntimeError("unexpected NWS points response")
+    properties = points.get("properties") or {}
+    grid_url = properties.get("forecastGridData")
+    if not grid_url:
+        raise RuntimeError("NWS points response missing forecastGridData")
+    grid_url = str(grid_url)
+    with grid_lock:
+        cached = grid_cache.get(grid_url)
+    if cached is not None:
+        return cached
+    grid = get_json(grid_url, headers=NWS_HEADERS)
+    if not isinstance(grid, dict):
+        raise RuntimeError("unexpected NWS gridpoint response")
+    qpf = (grid.get("properties") or {}).get("quantitativePrecipitation") or {}
+    values = qpf.get("values")
+    if not isinstance(values, list) or not values:
+        raise RuntimeError("NWS gridpoint response missing quantitativePrecipitation")
+    now = datetime.now(timezone.utc)
+    totals = sum_qpf_windows(values, now=now, uom=qpf.get("uom"))
+    with grid_lock:
+        grid_cache[grid_url] = totals
+    return totals
+
+
+def _apply_nws_forecast(station: MorningRainfall, grid_cache: dict[str, dict[int, float]], grid_lock: Lock) -> None:
+    if station.latitude is None or station.longitude is None:
+        print(f"Warning: no coordinates for station {station.station_id}; skipping NWS forecast", file=sys.stderr)
+        return
+    try:
+        totals = fetch_nws_qpf_inches(
+            float(station.latitude),
+            float(station.longitude),
+            grid_cache=grid_cache,
+            grid_lock=grid_lock,
+        )
+    except (RuntimeError, ValueError, TypeError) as exc:
+        print(f"Warning: NWS forecast unavailable for {station.station_id}: {exc}", file=sys.stderr)
+        return
+    station.fcst_24h_in = totals[24]
+    station.fcst_48h_in = totals[48]
+    station.fcst_72h_in = totals[72]
+
+
+def attach_nws_forecasts(stations: list[MorningRainfall]) -> None:
+    grid_cache: dict[str, dict[int, float]] = {}
+    grid_lock = Lock()
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        list(executor.map(lambda station: _apply_nws_forecast(station, grid_cache, grid_lock), stations))
 
 
 def number(amount: float | None) -> str:
@@ -231,7 +366,7 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
         "",
         f"Updated **{generated}** from the [Sarasota County Water Atlas]({WATER_ATLAS_HOME}).",
         "",
-        "1-, 2-, and 8-hour totals are summed precipitation increments from the Data Mapper graph API, anchored to each gauge's newest sample. 24-hour and 7-day totals come from the Water Atlas rainfall summary.",
+        "1-, 2-, and 8-hour totals are summed precipitation increments from the Data Mapper graph API, anchored to each gauge's newest sample. 24-hour and 7-day totals come from the Water Atlas rainfall summary. NWS 24h/48h/72h columns are National Weather Service quantitative precipitation forecasts at each gauge.",
         "",
     ]
     if not shown:
@@ -241,8 +376,8 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
 
     lines.extend(
         [
-            "| Station | Check area | 1h | 2h | 8h | 24h | 7d | Last updated |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| Station | Check area | NWS 24h | NWS 48h | NWS 72h | 1h | 2h | 8h | 24h | 7d | Last updated |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
     for station in shown:
@@ -252,6 +387,9 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
                 [
                     _station_label(station),
                     station.check_area or "n/a",
+                    number(station.fcst_24h_in),
+                    number(station.fcst_48h_in),
+                    number(station.fcst_72h_in),
                     number(station.rain_1h_in),
                     number(station.rain_2h_in),
                     number(station.rain_8h_in),
@@ -280,12 +418,17 @@ def print_table(stations: list[MorningRainfall], top: int | None) -> None:
         print("No stations to display.")
         return
 
-    header = f"{'Station':25} {'Check area':38} {'1h':>6} {'2h':>6} {'8h':>6} {'24h':>6} {'7d':>6}"
+    header = (
+        f"{'Station':25} {'Check area':38} {'NWS24':>6} {'NWS48':>6} {'NWS72':>6} "
+        f"{'1h':>6} {'2h':>6} {'8h':>6} {'24h':>6} {'7d':>6}"
+    )
     print(header)
     print("-" * len(header))
     for station in shown:
         print(
-            f"{station.station_name[:25]:25} {(station.check_area or 'n/a')[:38]:38} {number(station.rain_1h_in):>6} "
+            f"{station.station_name[:25]:25} {(station.check_area or 'n/a')[:38]:38} "
+            f"{number(station.fcst_24h_in):>6} {number(station.fcst_48h_in):>6} {number(station.fcst_72h_in):>6} "
+            f"{number(station.rain_1h_in):>6} "
             f"{number(station.rain_2h_in):>6} {number(station.rain_8h_in):>6} "
             f"{number(station.rain_24h_in):>6} {number(station.rain_7d_in):>6}"
         )
