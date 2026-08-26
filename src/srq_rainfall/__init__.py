@@ -376,7 +376,7 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
 
     lines.extend(
         [
-            "| Station | Check area | NWS 24h | NWS 48h | NWS 72h | 1h | 2h | 8h | 24h | 7d | Last updated |",
+            "| Station | Check area | 24h QPF | 48h QPF | 72h QPF | 1h | 2h | 8h | 24h | 7d | Last updated |",
             "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
@@ -419,7 +419,7 @@ def print_table(stations: list[MorningRainfall], top: int | None) -> None:
         return
 
     header = (
-        f"{'Station':25} {'Check area':38} {'NWS24':>6} {'NWS48':>6} {'NWS72':>6} "
+        f"{'Station':25} {'Check area':38} {'24h QPF':>6} {'48h QPF':>6} {'72h QPF':>6} "
         f"{'1h':>6} {'2h':>6} {'8h':>6} {'24h':>6} {'7d':>6}"
     )
     print(header)
