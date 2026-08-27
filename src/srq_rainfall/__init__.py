@@ -1,10 +1,14 @@
 """Print a rainfall report for Sarasota County Water Atlas gauges.
 
-The 1-, 2-, and 8-hour figures are calculated by summing the timestamped
-precipitation increments returned by the Data Mapper graph API.  The 24-hour
+The 8-hour and 36-hour figures are calculated by summing the timestamped
+precipitation increments returned by the Data Mapper graph API.  The 7-day
 and 7-day figures come directly from the Water Atlas rainfall summary API.
 NWS 24/48/72-hour columns are National Weather Service quantitative precipitation
 forecasts at each gauge's Water Atlas coordinates.
+
+Forecast-only sites (no rain gauges) are also included for NWS QPF coverage
+across additional locations.  These sites show QPF forecast values with blank
+rainfall columns.
 
 Usage:
     uv run srq-rainfall
@@ -33,7 +37,7 @@ import requests
 API_BASE = "https://api.wateratlas.usf.edu"
 DEFAULT_SITE_ID = 8  # Sarasota County Water Atlas
 RAINFALL_PARAMETER = "Rainfall_IN"
-LOOKBACK_HOURS = (1, 2, 8)
+LOOKBACK_HOURS = (8, 36)
 FORECAST_HOURS = (24, 48, 72)
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_RETRIES = 3
@@ -62,6 +66,17 @@ STATION_CHECKS = {
     "580": "Venice Airport and surrounding area",
 }
 
+# Sites with no rain gauges — included for NWS QPF forecast only.
+FORECAST_ONLY_SITES: list[tuple[str, float, float]] = [
+    ("Glebe Park", 27.273904, -82.549431),
+    ("Pinecraft Park", 27.318730, -82.503856),
+    ("Watertower Park", 27.373326, -82.550004),
+    ("Nathan Benderson Park", 27.373994, -82.451007),
+    ("Lorraine Fields", 27.382107, -82.399022),
+    ("Longino Ranch", 27.192080, -82.111412),
+    ("Bay Street Park", 27.197788, -82.484885),
+]
+
 
 @dataclass
 class MorningRainfall:
@@ -73,10 +88,8 @@ class MorningRainfall:
     fcst_24h_in: float | None
     fcst_48h_in: float | None
     fcst_72h_in: float | None
-    rain_1h_in: float | None
-    rain_2h_in: float | None
     rain_8h_in: float | None
-    rain_24h_in: float | None
+    rain_36h_in: float | None
     rain_7d_in: float | None
     last_updated: str | None
     station_url: str | None
@@ -144,7 +157,7 @@ def fetch_recent_totals(datasource: str, station_id: str) -> dict[int, float]:
         f"{API_BASE}/DataMapper/Agency/{datasource}/Station/{station_id}"
         f"/Parameter/{RAINFALL_PARAMETER}/GraphData"
     )
-    data = get_json(endpoint, params={"numberOfDays": 1, "endDate": ""})
+    data = get_json(endpoint, params={"numberOfDays": 2, "endDate": ""})
     if not isinstance(data, list) or not data:
         raise RuntimeError("no precipitation graph samples returned")
 
@@ -189,14 +202,32 @@ def build_station(record: dict) -> MorningRainfall:
         fcst_24h_in=None,
         fcst_48h_in=None,
         fcst_72h_in=None,
-        rain_1h_in=recent.get(1) if recent else None,
-        rain_2h_in=recent.get(2) if recent else None,
         rain_8h_in=recent.get(8) if recent else None,
-        rain_24h_in=_as_float(value(record, "total24h", "Total24h")),
+        rain_36h_in=recent.get(36) if recent else None,
         rain_7d_in=_as_float(value(record, "total7d", "Total7d")),
         last_updated=value(record, "lastUpdated", "LastUpdated"),
         station_url=value(record, "stationUrl", "StationUrl"),
         datasource_id=str(datasource_id) if datasource_id else None,
+    )
+
+
+def build_forecast_only_station(name: str, latitude: float, longitude: float) -> MorningRainfall:
+    """Create a station with coordinates for NWS QPF forecast but no rain gauge data."""
+    return MorningRainfall(
+        station_id="",
+        station_name=name,
+        check_area=None,
+        latitude=latitude,
+        longitude=longitude,
+        fcst_24h_in=None,
+        fcst_48h_in=None,
+        fcst_72h_in=None,
+        rain_8h_in=None,
+        rain_36h_in=None,
+        rain_7d_in=None,
+        last_updated=None,
+        station_url=None,
+        datasource_id=None,
     )
 
 
@@ -216,6 +247,13 @@ def fetch_report(site_id: int, include_all_stations: bool) -> list[MorningRainfa
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # map preserves the selected field-check order while still fetching in parallel.
         stations = list(executor.map(build_station, raw_stations))
+
+    # Add forecast-only sites (no rain gauges, QPF forecast only)
+    stations.extend(
+        build_forecast_only_station(name, lat, lon)
+        for name, lat, lon in FORECAST_ONLY_SITES
+    )
+
     attach_nws_forecasts(stations)
     return stations
 
@@ -366,7 +404,7 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
         "",
         f"Updated **{generated}** from the [Sarasota County Water Atlas]({WATER_ATLAS_HOME}).",
         "",
-        "1-, 2-, and 8-hour totals are summed precipitation increments from the Data Mapper graph API, anchored to each gauge's newest sample. 24-hour and 7-day totals come from the Water Atlas rainfall summary. NWS 24h/48h/72h columns are National Weather Service quantitative precipitation forecasts at each gauge.",
+        "8-hour and 36-hour totals are summed precipitation increments from the Data Mapper graph API, anchored to each gauge's newest sample. 7-day totals come from the Water Atlas rainfall summary. NWS 24h/48h/72h columns are National Weather Service quantitative precipitation forecasts at each gauge.",
         "",
     ]
     if not shown:
@@ -376,8 +414,8 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
 
     lines.extend(
         [
-            "| Station | Check area | NWS 24h | NWS 48h | NWS 72h | 1h | 2h | 8h | 24h | 7d | Last updated |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| Station | Check area | NWS 24h | NWS 48h | NWS 72h | 8h | 36h | 7d | Last updated |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
     for station in shown:
@@ -390,10 +428,8 @@ def render_markdown(stations: list[MorningRainfall], *, generated_at: datetime, 
                     number(station.fcst_24h_in),
                     number(station.fcst_48h_in),
                     number(station.fcst_72h_in),
-                    number(station.rain_1h_in),
-                    number(station.rain_2h_in),
                     number(station.rain_8h_in),
-                    number(station.rain_24h_in),
+                    number(station.rain_36h_in),
                     number(station.rain_7d_in),
                     format_last_updated(station.last_updated),
                 ]
@@ -420,7 +456,7 @@ def print_table(stations: list[MorningRainfall], top: int | None) -> None:
 
     header = (
         f"{'Station':25} {'Check area':38} {'NWS24':>6} {'NWS48':>6} {'NWS72':>6} "
-        f"{'1h':>6} {'2h':>6} {'8h':>6} {'24h':>6} {'7d':>6}"
+        f"{'8h':>6} {'36h':>6} {'7d':>6}"
     )
     print(header)
     print("-" * len(header))
@@ -428,11 +464,10 @@ def print_table(stations: list[MorningRainfall], top: int | None) -> None:
         print(
             f"{station.station_name[:25]:25} {(station.check_area or 'n/a')[:38]:38} "
             f"{number(station.fcst_24h_in):>6} {number(station.fcst_48h_in):>6} {number(station.fcst_72h_in):>6} "
-            f"{number(station.rain_1h_in):>6} "
-            f"{number(station.rain_2h_in):>6} {number(station.rain_8h_in):>6} "
-            f"{number(station.rain_24h_in):>6} {number(station.rain_7d_in):>6}"
+            f"{number(station.rain_8h_in):>6} "
+            f"{number(station.rain_36h_in):>6} {number(station.rain_7d_in):>6}"
         )
-    print("\nAll rainfall amounts are inches. Short windows are summed graph-data increments.")
+    print("\nAll rainfall amounts are inches. 8-hour total is summed graph-data increments.")
 
 
 def write_outputs(stations: list[MorningRainfall], out_dir: Path) -> tuple[Path, Path]:
