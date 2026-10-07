@@ -1,23 +1,23 @@
 # Sarasota County rainfall
 
-Updated **2026-10-07 05:11 EDT** from the [Sarasota County Water Atlas](https://www.sarasota.wateratlas.usf.edu/).
+Updated **2026-10-07 12:52 EDT** from the [Sarasota County Water Atlas](https://www.sarasota.wateratlas.usf.edu/).
 
 8-hour and 36-hour totals are summed precipitation increments from the Data Mapper graph API, anchored to each gauge's newest sample. 7-day totals come from the Water Atlas rainfall summary. NWS 24h/48h/72h columns are National Weather Service quantitative precipitation forecasts at each gauge.
 
 | Station | Check area | NWS 24h | NWS 48h | NWS 72h | 8h | 36h | 7d | Last updated |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| [PH-14 BoB](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=416) | Sod farm and surrounding area | 1.14 | 2.06 | 2.32 | 0.71 | 2.07 | 2.73 | 2026-10-07 04:00 EDT |
-| [St Armand's](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=501) | Lido Beach | 1.44 | 2.34 | 2.52 | 0.52 | 2.87 | 3.03 | 2026-10-07 04:00 EDT |
-| [Siesta Key](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=502) | Siesta Key | 1.64 | 2.51 | 2.67 | 0.51 | 2.62 | 2.75 | 2026-10-07 04:00 EDT |
-| [MS-1 CMR](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=251) | Route 72 East of MSP | 1.19 | 1.92 | 2.12 | 0.68 | 0.73 | 0.91 | 2026-10-07 04:00 EDT |
-| [Hidden River MYR-3](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=818) | Old Myakka Bridge | 1.17 | 2.37 | 2.62 | 0.52 | 0.72 | 0.76 | 2026-10-07 04:00 EDT |
-| [HC-1  Venice Ave E](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=580) | Venice Airport and surrounding area | 1.31 | 2.55 | 2.71 | 0.83 | 1.31 | 3.43 | 2026-10-07 04:00 EDT |
-| Glebe Park | n/a | 1.54 | 2.41 | 2.58 | -- | -- | -- | -- |
-| Pinecraft Park | n/a | 1.32 | 2.15 | 2.36 | -- | -- | -- | -- |
-| Watertower Park | n/a | 1.42 | 2.37 | 2.59 | -- | -- | -- | -- |
-| Nathan Benderson Park | n/a | 1.20 | 2.03 | 2.27 | -- | -- | -- | -- |
-| Lorraine Fields | n/a | 1.11 | 2.00 | 2.27 | -- | -- | -- | -- |
-| Longino Ranch | n/a | 1.03 | 1.68 | 1.94 | -- | -- | -- | -- |
-| Bay Street Park | n/a | 1.60 | 2.46 | 2.62 | -- | -- | -- | -- |
+| [PH-14 BoB](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=416) | Sod farm and surrounding area | 0.98 | 1.69 | 1.95 | 0.16 | 2.23 | 2.89 | 2026-10-07 12:00 EDT |
+| [St Armand's](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=501) | Lido Beach | 1.13 | 1.86 | 2.05 | 0.25 | 3.12 | 3.28 | 2026-10-07 11:00 EDT |
+| [Siesta Key](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=502) | Siesta Key | 1.36 | 2.01 | 2.20 | 0.43 | 3.05 | 3.18 | 2026-10-07 12:00 EDT |
+| [MS-1 CMR](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=251) | Route 72 East of MSP | 0.95 | 1.56 | 1.79 | 0.02 | 0.75 | 0.93 | 2026-10-07 12:00 EDT |
+| [Hidden River MYR-3](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=818) | Old Myakka Bridge | 0.98 | 1.95 | 2.21 | 0.08 | 0.80 | 0.83 | 2026-10-07 12:00 EDT |
+| [HC-1  Venice Ave E](https://sarasota.wateratlas.usf.edu/datamapper/station.aspx?ds=SARASOTA_ARMS&s=580) | Venice Airport and surrounding area | 1.00 | 2.08 | 2.27 | 0.46 | 1.77 | 3.89 | 2026-10-07 12:00 EDT |
+| Glebe Park | n/a | 1.30 | 1.96 | 2.14 | -- | -- | -- | -- |
+| Pinecraft Park | n/a | 1.10 | 1.76 | 1.98 | -- | -- | -- | -- |
+| Watertower Park | n/a | 1.06 | 1.85 | 2.08 | -- | -- | -- | -- |
+| Nathan Benderson Park | n/a | 0.96 | 1.64 | 1.89 | -- | -- | -- | -- |
+| Lorraine Fields | n/a | 0.94 | 1.65 | 1.92 | -- | -- | -- | -- |
+| Longino Ranch | n/a | 0.78 | 1.35 | 1.63 | -- | -- | -- | -- |
+| Bay Street Park | n/a | 1.24 | 1.93 | 2.12 | -- | -- | -- | -- |
 
 All rainfall amounts are inches.
