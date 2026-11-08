@@ -1,6 +1,6 @@
 # Sarasota County rainfall
 
-Updated **2026-11-08 01:38 EST** from the [Sarasota County Water Atlas](https://www.sarasota.wateratlas.usf.edu/).
+Updated **2026-11-08 09:29 EST** from the [Sarasota County Water Atlas](https://www.sarasota.wateratlas.usf.edu/).
 
 8-hour and 36-hour totals are summed precipitation increments from the Data Mapper graph API, anchored to each gauge's newest sample. 7-day totals come from the Water Atlas rainfall summary. NWS 24h/48h/72h columns are National Weather Service quantitative precipitation forecasts at each gauge.
 
